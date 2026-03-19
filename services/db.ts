@@ -1,120 +1,96 @@
 
 import { UserAccount, SavedPatient } from '../types';
-import { db as firestore, auth, collection, doc, setDoc, getDoc, getDocs, deleteDoc, query, where } from '../firebase';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string;
-    email?: string | null;
-    emailVerified?: boolean;
-    isAnonymous?: boolean;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+import { supabase } from './supabase';
 
 export const db = {
   users: {
-    get: async (uid: string): Promise<UserAccount | null> => {
-      try {
-        const docRef = doc(firestore, 'users', uid);
-        const docSnap = await getDoc(docRef);
-        return docSnap.exists() ? (docSnap.data() as UserAccount) : null;
-      } catch (e) {
-        handleFirestoreError(e, OperationType.GET, `users/${uid}`);
-        return null;
-      }
+    // Kept for compatibility if needed, but authService now uses Supabase directly
+    getAll: (): UserAccount[] => {
+      return [];
     },
-    getAll: async (): Promise<UserAccount[]> => {
-      try {
-        const querySnapshot = await getDocs(collection(firestore, 'users'));
-        return querySnapshot.docs.map(doc => doc.data() as UserAccount);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.LIST, 'users');
-        return [];
-      }
+    get: (uid: string): UserAccount | null => {
+      return null;
     },
-    add: async (user: UserAccount & { uid: string }): Promise<void> => {
-      try {
-        await setDoc(doc(firestore, 'users', user.uid), user, { merge: true });
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`);
-      }
+    add: (user: UserAccount): void => {
     },
-    delete: async (uid: string): Promise<void> => {
-      try {
-        await deleteDoc(doc(firestore, 'users', uid));
-      } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `users/${uid}`);
-      }
+    delete: (uid: string): void => {
     }
   },
   patients: {
-    getAll: async (): Promise<SavedPatient[]> => {
-      try {
-        if (!auth.currentUser) return [];
-        const q = query(collection(firestore, 'patients'), where('authorUid', '==', auth.currentUser.uid));
-        const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => doc.data() as SavedPatient);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.LIST, 'patients');
+    getAll: async (authorUid: string): Promise<SavedPatient[]> => {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*')
+        .eq('author_uid', authorUid);
+        
+      if (error) {
+        console.error('Error fetching patients:', error);
         return [];
       }
+      
+      return data.map(p => ({
+        id: p.id,
+        authorUid: p.author_uid,
+        patientName: p.patient_name,
+        age: p.age,
+        sex: p.sex,
+        phone: p.phone,
+        email: p.email,
+        address: p.address,
+        complaint: p.complaint,
+        symptoms: p.symptoms,
+        selectedSymptoms: p.selected_symptoms,
+        tongue: p.tongue,
+        pulse: p.pulse,
+        diagnosis: p.diagnosis,
+        timestamp: p.timestamp,
+        medicalHistory: p.medical_history,
+        biomedicalDiagnosis: p.biomedical_diagnosis,
+        icd10: p.icd10,
+        medications: p.medications,
+        followUpDate: p.follow_up_date,
+        notes: p.notes
+      }));
     },
-    add: async (patient: SavedPatient) => {
-      try {
-        if (!auth.currentUser) throw new Error("Not authenticated");
-        const patientWithAuth = { ...patient, authorUid: auth.currentUser.uid };
-        await setDoc(doc(firestore, 'patients', patient.id), patientWithAuth);
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `patients/${patient.id}`);
+    add: async (patient: SavedPatient): Promise<void> => {
+      const { error } = await supabase
+        .from('patients')
+        .upsert({
+          id: patient.id,
+          author_uid: patient.authorUid,
+          patient_name: patient.patientName,
+          age: patient.age,
+          sex: patient.sex,
+          phone: patient.phone,
+          email: patient.email,
+          address: patient.address,
+          complaint: patient.complaint,
+          symptoms: patient.symptoms,
+          selected_symptoms: patient.selectedSymptoms,
+          tongue: patient.tongue,
+          pulse: patient.pulse,
+          diagnosis: patient.diagnosis,
+          timestamp: patient.timestamp,
+          medical_history: patient.medicalHistory,
+          biomedical_diagnosis: patient.biomedicalDiagnosis,
+          icd10: patient.icd10,
+          medications: patient.medications,
+          follow_up_date: patient.followUpDate,
+          notes: patient.notes
+        });
+        
+      if (error) {
+        console.error("Failed to save patient", error);
       }
     },
-    delete: async (id: string) => {
-      try {
-        await deleteDoc(doc(firestore, 'patients', id));
-      } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `patients/${id}`);
+    delete: async (id: string): Promise<void> => {
+      const { error } = await supabase
+        .from('patients')
+        .delete()
+        .eq('id', id);
+        
+      if (error) {
+        console.error("Failed to delete patient", error);
       }
     }
   }

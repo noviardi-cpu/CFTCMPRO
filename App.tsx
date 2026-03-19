@@ -1,19 +1,18 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Activity, MessageSquare, Stethoscope, Archive, Compass, GraduationCap, Shield, LogOut, ClipboardList, Loader2, Menu, X, Globe, User, LayoutGrid, Scale, Paperclip, Image as ImageIcon } from 'lucide-react';
+import { Send, Activity, MessageSquare, Stethoscope, Archive, Compass, GraduationCap, Shield, LogOut, ClipboardList, Loader2, Menu, X, Globe, User, LayoutGrid, Scale, Paperclip, Image as ImageIcon, ShieldAlert, Ban } from 'lucide-react';
 import { Language, ChatMessage, ScoredSyndrome, UserAccount, TcmDiagnosisResult } from './types';
 import { sendMessageToGeminiStream } from './services/geminiService';
 import { analyzePatient } from './services/tcmLogic';
 import { db } from './services/db';
-import { auth } from './firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { getActiveUser, logout, updateSessionId, clearAdminMessage } from './services/authService';
+import { supabase } from './services/supabase';
 import DiagnosisCard from './components/DiagnosisCard';
 import PatientFormModal from './components/PatientFormModal';
 import WuXingVisualizerModal from './components/WuXingVisualizerModal';
 import ScoringAndPointsHub from './components/ScoringAndPointsHub';
 import WuXingMasterPanel from './components/WuXingMasterPanel';
 import LoginScreen from './components/LoginScreen';
-import UserManagementModal from './components/UserManagementModal';
 import UkomPracticePanel from './components/UkomPracticePanel';
 import PatientArchivePanel from './components/PatientArchivePanel';
 import SyndromeAtlasWindow from './components/SyndromeAtlasWindow';
@@ -25,36 +24,66 @@ import AdminConsolePanel from './components/AdminConsolePanel';
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [sessionId] = useState(() => crypto.randomUUID());
+  const [isDuplicateSession, setIsDuplicateSession] = useState(false);
 
-    useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const userFromDb = await db.users.get(user.uid);
-        if (userFromDb) {
-          setCurrentUser(userFromDb);
-        } else {
-          // If user exists in Auth but not in DB, create a new record
-          const newUser: UserAccount & { uid: string } = {
-            uid: user.uid,
-            username: user.displayName || user.email || 'User',
-            password: '', // Not needed with Firebase Auth
-            role: 'user',
-            createdAt: Date.now(),
-            subscriptionEnd: Date.now() + 3 * 24 * 60 * 60 * 1000, // Default 3 days free trial
-            allowedFeatures: {
-              chat: true, cdss: true, atlas: true, wuxing: true, archive: true, invoice: true, bmi: true
-            }
-          };
-          await db.users.add(newUser);
-          setCurrentUser(newUser);
-        }
-      } else {
-        setCurrentUser(null);
+  useEffect(() => {
+    const initAuth = async () => {
+      const user = await getActiveUser();
+      if (user && user.uid) {
+        await updateSessionId(user.uid, sessionId);
+        setCurrentUser({...user, currentSessionId: sessionId});
       }
       setIsAuthReady(true);
-    });
-    return () => unsubscribe();
-  }, []);
+    };
+    initAuth();
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const channel = supabase
+      .channel('public:users')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${currentUser.uid}`
+        },
+        (payload) => {
+          const newSessionId = payload.new.current_session_id;
+          if (newSessionId && newSessionId !== sessionId) {
+            setIsDuplicateSession(true);
+          } else if (newSessionId === null) {
+            // Force logout
+            logout();
+            setCurrentUser(null);
+          }
+          
+          // Update currentUser with new isActive and adminMessage
+          setCurrentUser(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              isActive: payload.new.is_active,
+              adminMessage: payload.new.admin_message || undefined
+            };
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.uid, sessionId]);
+
+  const handleLogout = () => {
+    logout();
+    setCurrentUser(null);
+  };
 
   const [activePanel, setActivePanel] = useState<'chat' | 'diagnosis' | 'wuxing' | 'ukom' | 'archive' | 'atlas' | 'invoice' | 'bmi' | 'admin'>('chat');
   const [appLanguage, setAppLanguage] = useState<Language>(Language.INDONESIAN);
@@ -176,7 +205,61 @@ const App: React.FC = () => {
     );
   }
 
-  if (!currentUser) return <LoginScreen onLoginSuccess={setCurrentUser} />;
+  if (!currentUser) return <LoginScreen onLoginSuccess={async (user) => {
+    if (user.uid) {
+      await updateSessionId(user.uid, sessionId);
+      setCurrentUser({...user, currentSessionId: sessionId});
+    } else {
+      setCurrentUser(user);
+    }
+  }} />;
+
+  if (isDuplicateSession) {
+    return (
+      <div className="min-h-screen bg-purple-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center border border-rose-100">
+          <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <ShieldAlert className="w-8 h-8 text-rose-600" />
+          </div>
+          <h2 className="text-2xl font-black text-purple-950 mb-4">Sesi Ganda Terdeteksi</h2>
+          <p className="text-purple-600 mb-8 leading-relaxed">
+            Akun Anda sedang dibuka di perangkat atau tab lain. Untuk keamanan, sesi di halaman ini telah dihentikan.
+          </p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold transition-all shadow-md"
+          >
+            Gunakan di Perangkat Ini
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentUser.isActive === false) {
+    return (
+      <div className="min-h-screen bg-purple-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center border border-rose-100">
+          <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Ban className="w-8 h-8 text-rose-600" />
+          </div>
+          <h2 className="text-2xl font-black text-purple-950 mb-4">Akun Dinonaktifkan</h2>
+          <p className="text-purple-600 mb-8 leading-relaxed">
+            Akun Anda saat ini dinonaktifkan sementara oleh Administrator. Silakan hubungi layanan dukungan untuk informasi lebih lanjut.
+          </p>
+          <button 
+            onClick={async () => {
+              await logout();
+              setCurrentUser(null);
+            }}
+            className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition-all shadow-md"
+          >
+            Kembali ke Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const isFeatureAllowed = (featureId: keyof NonNullable<UserAccount['allowedFeatures']>) => {
     if (currentUser.role === 'super_admin' || currentUser.role === 'admin') return true;
@@ -274,13 +357,21 @@ const App: React.FC = () => {
                 className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-purple-50 rounded-xl border border-purple-200 transition-all active:scale-95 group shadow-sm"
               >
                 <Globe className="w-4 h-4 text-tcm-primary group-hover:rotate-12 transition-transform" />
-                <span className="text-xs font-black uppercase tracking-tighter text-purple-900">
+                <span className="text-xs font-bold uppercase tracking-tighter text-purple-900">
                   {appLanguage === Language.ENGLISH ? "EN" : "ID"}
                 </span>
               </button>
-              <div className="w-9 h-9 bg-gradient-to-br from-purple-100 to-purple-200 rounded-full border border-purple-300 flex items-center justify-center shadow-inner">
-                 <User className="w-5 h-5 text-purple-600" />
+              <div className="flex items-center gap-2 bg-gradient-to-br from-purple-100 to-purple-200 rounded-full border border-purple-300 shadow-inner px-3 py-1.5">
+                 <User className="w-4 h-4 text-purple-600" />
+                 <span className="text-xs font-bold text-purple-900">{currentUser.email}</span>
               </div>
+              <button 
+                onClick={handleLogout}
+                className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl transition-colors"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
            </div>
         </header>
 
@@ -415,6 +506,34 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
+      
+      {/* Admin Message Modal */}
+      {currentUser.adminMessage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-purple-950/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 border border-purple-100 animate-fade-in text-center">
+            <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <MessageSquare className="w-8 h-8 text-indigo-600" />
+            </div>
+            <h2 className="text-2xl font-black text-purple-950 mb-4 uppercase tracking-tighter">Pesan dari Admin</h2>
+            <div className="bg-purple-50 p-6 rounded-2xl border border-purple-100 mb-8 text-left">
+              <p className="text-purple-900 leading-relaxed font-medium">
+                {currentUser.adminMessage}
+              </p>
+            </div>
+            <button 
+              onClick={async () => {
+                if (currentUser.uid) {
+                  await clearAdminMessage(currentUser.uid);
+                  setCurrentUser({...currentUser, adminMessage: undefined});
+                }
+              }}
+              className="w-full py-4 bg-tcm-primary hover:bg-purple-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-purple-900/20"
+            >
+              Saya Mengerti
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

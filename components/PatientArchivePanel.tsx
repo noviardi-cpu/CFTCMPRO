@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/db';
 import { SavedPatient } from '../types';
+import { getActiveUser } from '../services/authService';
 import { 
   Search, Trash2, User, Calendar, FileText, ChevronRight, Activity, X, RotateCcw, 
   BrainCircuit, MapPin, Stethoscope, Pill, Clipboard, TrendingUp, CheckCircle2, 
@@ -19,31 +20,19 @@ const PatientArchivePanel: React.FC<Props> = ({ onLoadPatient }) => {
   const [selectedPatient, setSelectedPatient] = useState<SavedPatient | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    let unsubscribe: () => void;
-    import('../firebase').then(({ db: firestore, collection, query, where, onSnapshot, auth }) => {
-      if (!auth.currentUser) return;
-      const q = query(collection(firestore, 'patients'), where('authorUid', '==', auth.currentUser.uid));
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const patientsData: SavedPatient[] = [];
-        snapshot.forEach((doc) => {
-          patientsData.push(doc.data() as SavedPatient);
-        });
-        setPatients(patientsData);
-      }, (error) => {
-        console.error("Error listening to patients:", error);
-      });
-    });
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, []);
-
   const loadPatients = async () => {
     setIsRefreshing(true);
-    // Real-time listener handles the data, just visual feedback here
+    const user = await getActiveUser();
+    if (user) {
+      const data = await db.patients.getAll(user.uid!);
+      setPatients(data);
+    }
     setTimeout(() => setIsRefreshing(false), 500);
   };
+
+  useEffect(() => {
+    loadPatients();
+  }, []);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();

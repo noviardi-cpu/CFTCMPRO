@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserAccount } from '../types';
-import { getUsers, saveUser, deleteUser } from '../services/authService';
-import { Shield, Clock, CheckCircle, XCircle, User, Trash2 } from 'lucide-react';
+import { getUsers, saveUser, deleteUser, forceLogout } from '../services/authService';
+import { Shield, Clock, CheckCircle, XCircle, User, Trash2, LogOut, MessageSquare, Ban } from 'lucide-react';
 
 interface Props {
   currentUser: UserAccount;
@@ -15,7 +15,14 @@ const AdminConsolePanel: React.FC<Props> = ({ currentUser }) => {
   const loadUsers = async () => {
     setLoading(true);
     const fetchedUsers = await getUsers();
-    setUsers(fetchedUsers);
+    
+    // Filter users based on role
+    let filteredUsers = fetchedUsers;
+    if (currentUser.role === 'admin') {
+      filteredUsers = fetchedUsers.filter(u => u.role === 'user');
+    }
+    
+    setUsers(filteredUsers);
     setLoading(false);
   };
 
@@ -67,7 +74,7 @@ const AdminConsolePanel: React.FC<Props> = ({ currentUser }) => {
                 className={`p-4 cursor-pointer transition-colors hover:bg-purple-50 flex items-center justify-between ${selectedUser?.uid === u.uid ? 'bg-purple-100' : ''}`}
               >
                 <div>
-                  <div className="font-bold text-sm text-purple-900">{u.username}</div>
+                  <div className="font-bold text-sm text-purple-900">{u.email}</div>
                   <div className="text-xs text-purple-500 capitalize">{u.role.replace('_', ' ')}</div>
                 </div>
                 {u.subscriptionEnd && u.subscriptionEnd > Date.now() ? (
@@ -86,7 +93,7 @@ const AdminConsolePanel: React.FC<Props> = ({ currentUser }) => {
             <div className="bg-white rounded-2xl shadow-sm border border-purple-100 p-6 space-y-6">
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="text-xl font-bold text-purple-950">{selectedUser.username}</h3>
+                  <h3 className="text-xl font-bold text-purple-950">{selectedUser.email}</h3>
                   <p className="text-sm text-purple-500">UID: {selectedUser.uid}</p>
                 </div>
                 {currentUser.role === 'super_admin' && selectedUser.uid !== currentUser.uid && (
@@ -127,12 +134,11 @@ const AdminConsolePanel: React.FC<Props> = ({ currentUser }) => {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { label: '+3 Hari', days: 3 },
-                    { label: '+6 Hari', days: 6 },
                     { label: '+1 Bulan', days: 30 },
                     { label: '+3 Bulan', days: 90 },
-                    { label: '+6 Bulan', days: 180 },
+                    { label: '+5 Bulan', days: 150 },
                     { label: '+1 Tahun', days: 365 },
+                    { label: 'Selamanya', days: 36500 },
                   ].map(plan => (
                     <button 
                       key={plan.days}
@@ -187,6 +193,54 @@ const AdminConsolePanel: React.FC<Props> = ({ currentUser }) => {
                       </label>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Account Controls */}
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-purple-900 uppercase">Kontrol Akun</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setSelectedUser({...selectedUser, isActive: selectedUser.isActive === false ? true : false})}
+                    className={`flex items-center justify-center gap-2 p-3 rounded-xl font-bold transition-colors ${selectedUser.isActive === false ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-rose-100 text-rose-700 hover:bg-rose-200'}`}
+                  >
+                    <Ban className="w-4 h-4" />
+                    {selectedUser.isActive === false ? 'Aktifkan Akun' : 'Nonaktifkan Sementara'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (selectedUser.uid && window.confirm('Yakin ingin menendang user ini dari sesinya?')) {
+                        await forceLogout(selectedUser.uid);
+                        alert('User berhasil ditendang dari sesi aktif.');
+                        loadUsers();
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2 p-3 bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-xl font-bold transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Tendang User (Force Logout)
+                  </button>
+                </div>
+              </div>
+
+              {/* Admin Message */}
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-purple-900 uppercase">Kirim Pesan ke User</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={selectedUser.adminMessage || ''}
+                    onChange={(e) => setSelectedUser({...selectedUser, adminMessage: e.target.value})}
+                    placeholder="Tulis pesan peringatan atau info..."
+                    className="flex-1 p-3 bg-purple-50 border border-purple-100 rounded-xl outline-none focus:border-tcm-primary text-sm"
+                  />
+                  <button
+                    onClick={() => handleSaveUser(selectedUser)}
+                    className="px-4 py-3 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-xl font-bold transition-colors flex items-center gap-2"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    Kirim
+                  </button>
                 </div>
               </div>
 

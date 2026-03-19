@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Activity, ThermometerSnowflake, User, Stethoscope, Pill, Calendar, Search, UserCheck, ChevronRight, Tag, Info, AlertCircle, Clipboard, History, ShieldAlert, FileText, Phone, Mail } from 'lucide-react';
 import { db } from '../services/db';
+import { getActiveUser } from '../services/authService';
 import { SavedPatient } from '../types';
 
 interface PatientData {
@@ -121,8 +122,11 @@ const PatientFormModal: React.FC<Props> = ({ isOpen, onClose, onSubmit }) => {
   useEffect(() => {
     if (isOpen) {
       const loadPatients = async () => {
-        const patients = await db.patients.getAll();
-        setStoredPatients(patients);
+        const user = await getActiveUser();
+        if (user) {
+          const patients = await db.patients.getAll(user.uid!);
+          setStoredPatients(patients);
+        }
       };
       loadPatients();
     }

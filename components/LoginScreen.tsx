@@ -1,23 +1,45 @@
 
 import React, { useState } from 'react';
-import { Database, Chrome } from 'lucide-react';
+import { Database, LogIn, UserPlus } from 'lucide-react';
 import { UserAccount } from '../types';
-import { auth, googleProvider, signInWithPopup } from '../firebase';
+import { login, register } from '../services/authService';
 
 interface Props {
   onLoginSuccess: (user: UserAccount) => void;
 }
 
 const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleGoogleLogin = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      // The onAuthStateChanged listener in App.tsx will handle the rest
-    } catch (error) {
-      console.error("Google login error:", error);
-      setError('Gagal login dengan Google.');
+      if (isRegistering) {
+        const result = await register(email, password);
+        if (result.success && result.user) {
+          onLoginSuccess(result.user);
+        } else {
+          setError(result.message);
+        }
+      } else {
+        const user = await login(email, password);
+        if (user) {
+          onLoginSuccess(user);
+        } else {
+          setError('Email atau password salah.');
+        }
+      }
+    } catch (err) {
+      setError('Terjadi kesalahan sistem.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -37,16 +59,49 @@ const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
           <p className="text-purple-500 text-xs font-bold uppercase tracking-widest mt-1">Clinical Decision Support System</p>
         </div>
 
-        {error && <p className="text-rose-500 text-xs font-bold text-center mb-4">{error}</p>}
+        {error && <p className="text-rose-500 text-xs font-bold text-center mb-4 bg-rose-50 p-2 rounded-lg border border-rose-100">{error}</p>}
 
-        <div className="mt-8 pt-8 border-t border-purple-100">
-           <button 
-             onClick={handleGoogleLogin}
-             className="w-full flex items-center justify-center gap-2 py-4 bg-white border border-slate-200 text-slate-700 font-black rounded-2xl hover:bg-slate-50 transition-all shadow-sm mb-4"
-           >
-              <Chrome className="w-5 h-5 text-blue-500" /> LOGIN DENGAN GOOGLE
-           </button>
-           <p className="text-[10px] text-purple-400 text-center mt-4 uppercase font-black tracking-widest">Login Google diperlukan untuk sinkronisasi antar perangkat.</p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-purple-900 uppercase tracking-widest mb-1">Email</label>
+            <input 
+              type="email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 text-sm focus:border-tcm-primary focus:ring-1 focus:ring-tcm-primary outline-none transition-all"
+              placeholder="Masukkan email"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-purple-900 uppercase tracking-widest mb-1">Password</label>
+            <input 
+              type="password" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 text-sm focus:border-tcm-primary focus:ring-1 focus:ring-tcm-primary outline-none transition-all"
+              placeholder="Masukkan password"
+            />
+          </div>
+
+          <button 
+            type="submit"
+            disabled={isLoading}
+            className="w-full flex items-center justify-center gap-2 py-4 bg-tcm-primary text-white font-black rounded-2xl hover:bg-purple-700 transition-all shadow-lg shadow-purple-900/20 mt-6 disabled:opacity-50"
+          >
+             {isRegistering ? <UserPlus className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
+             {isRegistering ? 'DAFTAR AKUN BARU' : 'LOGIN SEKARANG'}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button 
+            onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
+            className="text-xs text-purple-600 font-bold hover:text-purple-800 transition-colors uppercase tracking-widest"
+          >
+            {isRegistering ? 'Sudah punya akun? Login di sini' : 'Belum punya akun? Daftar gratis'}
+          </button>
         </div>
       </div>
     </div>

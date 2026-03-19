@@ -29,12 +29,15 @@ export interface Syndrome {
 }
 
 export interface UserAccount {
-  username: string;
+  email: string;
   password?: string;
   role: 'super_admin' | 'admin' | 'user';
   createdAt: number;
   uid?: string;
   subscriptionEnd?: number;
+  currentSessionId?: string;
+  isActive?: boolean;
+  adminMessage?: string;
   allowedFeatures?: {
     chat: boolean;
     cdss: boolean;
